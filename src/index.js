@@ -16,30 +16,41 @@ const client = new Client({
 
 const ROLE_NAME = process.env.CLAN_ROLE || 'BFL';
 const PORT = process.env.PORT || 3000;
+const CACHE_TTL = 30000; // refresh every 30 seconds
+
+let membersCache = null;
+let cacheTime = 0;
+
+async function fetchMembers() {
+  const guild = client.guilds.cache.first();
+  if (!guild) throw new Error('Bot not in any server');
+
+  await guild.members.fetch();
+
+  const role = guild.roles.cache.find(r => r.name === ROLE_NAME);
+  if (!role) throw new Error(`Role "${ROLE_NAME}" not found`);
+
+  return role.members.map(member => ({
+    id: member.id,
+    username: member.user.username,
+    displayName: member.displayName,
+    avatar: member.user.displayAvatarURL({ size: 64, extension: 'png' }),
+    online: member.presence?.status === 'online',
+    status: member.presence?.status || 'offline',
+    roles: member.roles.cache
+      .filter(r => r.name !== '@everyone' && r.name !== ROLE_NAME)
+      .map(r => r.name),
+  }));
+}
 
 app.get('/members', async (req, res) => {
   try {
-    const guild = client.guilds.cache.first();
-    if (!guild) return res.status(500).json({ error: 'Bot not in any server' });
-
-    await guild.members.fetch();
-
-    const role = guild.roles.cache.find(r => r.name === ROLE_NAME);
-    if (!role) return res.status(404).json({ error: `Role "${ROLE_NAME}" not found` });
-
-    const members = role.members.map(member => ({
-      id: member.id,
-      username: member.user.username,
-      displayName: member.displayName,
-      avatar: member.user.displayAvatarURL({ size: 64, format: 'png' }),
-      online: member.presence?.status === 'online',
-      status: member.presence?.status || 'offline',
-      roles: member.roles.cache
-        .filter(r => r.name !== '@everyone' && r.name !== ROLE_NAME)
-        .map(r => r.name),
-    }));
-
-    res.json({ members, count: members.length });
+    const now = Date.now();
+    if (!membersCache || now - cacheTime > CACHE_TTL) {
+      membersCache = await fetchMembers();
+      cacheTime = now;
+    }
+    res.json({ members: membersCache, count: membersCache.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
