@@ -1,0 +1,62 @@
+const { Client, GatewayIntentBits } = require('discord.js');
+const express = require('express');
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences,
+  ]
+});
+
+const ROLE_NAME = process.env.CLAN_ROLE || 'BFL';
+const PORT = process.env.PORT || 3000;
+
+// GET /members — returns all members with the BFL role
+app.get('/members', async (req, res) => {
+  try {
+    const guild = client.guilds.cache.first();
+    if (!guild) return res.status(500).json({ error: 'Bot not in any server' });
+
+    await guild.members.fetch();
+
+    const role = guild.roles.cache.find(r => r.name === ROLE_NAME);
+    if (!role) return res.status(404).json({ error: `Role "${ROLE_NAME}" not found` });
+
+    const members = role.members.map(member => ({
+      id: member.id,
+      username: member.user.username,
+      displayName: member.displayName,
+      avatar: member.user.displayAvatarURL({ size: 64, format: 'png' }),
+      online: member.presence?.status === 'online' || member.presence?.status === 'dnd' || member.presence?.status === 'idle',
+      status: member.presence?.status || 'offline',
+      roles: member.roles.cache
+        .filter(r => r.name !== '@everyone' && r.name !== ROLE_NAME)
+        .map(r => r.name),
+      joinedAt: member.joinedAt,
+    }));
+
+    res.json({ members, count: members.length, role: ROLE_NAME });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /health — ping check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', bot: client.user?.tag || 'not ready' });
+});
+
+client.once('ready', () => {
+  console.log(`✅ Bot logged in as ${client.user.tag}`);
+  console.log(`🌐 API running on port ${PORT}`);
+});
+
+client.login(process.env.DISCORD_TOKEN);
+app.listen(PORT, () => console.log(`API listening on port ${PORT}`));
