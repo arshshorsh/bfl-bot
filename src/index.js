@@ -1,6 +1,8 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -16,7 +18,35 @@ const client = new Client({
 
 const ROLE_NAME = process.env.CLAN_ROLE || 'BFL';
 const PORT = process.env.PORT || 3000;
-const CACHE_TTL = 30000; // refresh every 30 seconds
+const CACHE_TTL = 30000;
+const DATA_FILE = path.join('/tmp', 'bfl_data.json');
+
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  return {
+    matches: [
+      { result:'WIN', map:'Clubhouse', opp:'vs VORTEX', date:'MAR 28', mode:'Competitive', score:'4–2' },
+      { result:'WIN', map:'Villa', opp:'vs HEXCLAN', date:'MAR 26', mode:'Scrim', score:'4–1' },
+      { result:'LOSS', map:'Border', opp:'vs NIGHTFX', date:'MAR 24', mode:'Competitive', score:'2–4' },
+      { result:'WIN', map:'Kafe', opp:'vs 0GRAVITY', date:'MAR 21', mode:'Scrim', score:'4–3' },
+      { result:'DRAW', map:'Coastline', opp:'vs RDRUSH', date:'MAR 19', mode:'Ranked', score:'3–3' },
+    ],
+    announcements: [
+      { title: 'Welcome to BFL ESPORTS', body: 'The clan platform is now live.', date: 'MAR 30 2026' }
+    ],
+    applications: []
+  };
+}
+
+function saveData(data) {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(data)); } catch (e) {}
+}
+
+let db = loadData();
 
 let membersCache = null;
 let cacheTime = 0;
@@ -24,12 +54,9 @@ let cacheTime = 0;
 async function fetchMembers() {
   const guild = client.guilds.cache.first();
   if (!guild) throw new Error('Bot not in any server');
-
   await guild.members.fetch();
-
   const role = guild.roles.cache.find(r => r.name === ROLE_NAME);
   if (!role) throw new Error(`Role "${ROLE_NAME}" not found`);
-
   return role.members.map(member => ({
     id: member.id,
     username: member.user.username,
@@ -54,6 +81,19 @@ app.get('/members', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/data', (req, res) => {
+  res.json(db);
+});
+
+app.post('/data', (req, res) => {
+  const { key, value, pass } = req.body;
+  if (pass !== process.env.OWNER_PASS) return res.status(403).json({ error: 'Forbidden' });
+  if (!['matches', 'announcements', 'applications'].includes(key)) return res.status(400).json({ error: 'Invalid key' });
+  db[key] = value;
+  saveData(db);
+  res.json({ ok: true });
 });
 
 app.get('/health', (req, res) => {
